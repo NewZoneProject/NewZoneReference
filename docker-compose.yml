@@ -33,6 +33,14 @@ services:
     networks:
       - newzone-net
 
+  gateway:
+    build: ./services/gateway
+    container_name: gateway-service
+    ports:
+      - "3004:3004"
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
