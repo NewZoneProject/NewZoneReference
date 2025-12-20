@@ -146,6 +146,23 @@ services:
     networks:
       - newzone-net
 
+  event:
+    build: ./services/event
+    container_name: event-service
+    ports:
+      - "3008:3008"
+    restart: always
+    depends_on:
+      logging:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3008/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
