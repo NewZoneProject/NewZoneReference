@@ -163,6 +163,23 @@ services:
     networks:
       - newzone-net
 
+  directory:
+    build: ./services/directory
+    container_name: directory-service
+    ports:
+      - "3009:3009"
+    restart: always
+    depends_on:
+      monitoring:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3009/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
