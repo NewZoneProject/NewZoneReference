@@ -1,15 +1,21 @@
-/**
- * Metadata Microservice REST API
- * Stateless metadata integrity proofs
- * Pure Node.js http server, no dependencies
- */
-
 import http from "http";
 import { generateMetadataProof, verifyMetadataProof } from "./index.js";
 
 const PORT = process.env.PORT || 3001;
 
-const server = http.createServer(async (req, res) => {
+async function logEvent(source, event, payload = null) {
+  try {
+    await fetch("http://logging-service:3006/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, event, payload })
+    });
+  } catch {
+    // Logging is optional — ignore errors
+  }
+}
+
+const server = http.createServer((req, res) => {
   // Enable CORS + JSON headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
@@ -26,6 +32,10 @@ const server = http.createServer(async (req, res) => {
       try {
         const { metadata } = JSON.parse(body);
         const proof = generateMetadataProof(metadata);
+
+        // Логируем успешную генерацию proof
+        logEvent("metadata", "metadata_proof_generated", { proof_id: proof });
+
         res.writeHead(200);
         res.end(JSON.stringify({ proof_id: proof }));
       } catch (err) {
@@ -40,6 +50,10 @@ const server = http.createServer(async (req, res) => {
       try {
         const { metadata, proof_id } = JSON.parse(body);
         const valid = verifyMetadataProof(metadata, proof_id);
+
+        // Логируем результат проверки
+        logEvent("metadata", "metadata_verified", { proof_id, valid });
+
         res.writeHead(200);
         res.end(JSON.stringify({ valid }));
       } catch (err) {
