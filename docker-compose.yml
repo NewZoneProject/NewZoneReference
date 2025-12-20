@@ -21,6 +21,9 @@ services:
     ports:
       - "3001:3001"
     restart: always
+    depends_on:
+      identity:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 5s
@@ -35,6 +38,9 @@ services:
     ports:
       - "3002:3002"
     restart: always
+    depends_on:
+      metadata:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
       interval: 5s
@@ -49,6 +55,9 @@ services:
     ports:
       - "3003:3003"
     restart: always
+    depends_on:
+      consensus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3003/health"]
       interval: 5s
@@ -63,6 +72,15 @@ services:
     ports:
       - "3004:3004"
     restart: always
+    depends_on:
+      identity:
+        condition: service_healthy
+      metadata:
+        condition: service_healthy
+      consensus:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
       interval: 5s
