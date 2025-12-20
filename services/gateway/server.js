@@ -21,6 +21,11 @@ const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
 
+  if (req.method === "GET" && req.url === "/health") {
+    res.writeHead(200);
+    return res.end(JSON.stringify({ status: "ok" }));
+  }
+
   // Find matching prefix
   const prefix = Object.keys(ROUTES).find(p => req.url.startsWith(p));
   if (!prefix) {

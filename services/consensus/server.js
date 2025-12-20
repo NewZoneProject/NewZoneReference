@@ -7,12 +7,17 @@
 import http from "http";
 import { generateConsensusProof, verifyConsensusProof } from "./index.js";
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3002;
 
 const server = http.createServer(async (req, res) => {
   // Enable CORS + JSON headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "GET" && req.url === "/health") {
+    res.writeHead(200);
+    return res.end(JSON.stringify({ status: "ok" }));
+  }
 
   if (req.method === "POST" && req.url === "/generate") {
     let body = "";
