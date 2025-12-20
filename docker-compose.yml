@@ -25,6 +25,14 @@ services:
     networks:
       - newzone-net
 
+  storage:
+    build: ./services/storage
+    container_name: storage-service
+    ports:
+      - "3003:3003"
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
