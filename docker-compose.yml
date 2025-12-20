@@ -6,6 +6,7 @@ services:
     container_name: identity-service
     ports:
       - "3000:3000"
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 5s
@@ -19,6 +20,7 @@ services:
     container_name: metadata-service
     ports:
       - "3001:3001"
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 5s
@@ -32,6 +34,7 @@ services:
     container_name: consensus-service
     ports:
       - "3002:3002"
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
       interval: 5s
@@ -45,6 +48,7 @@ services:
     container_name: storage-service
     ports:
       - "3003:3003"
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3003/health"]
       interval: 5s
@@ -58,6 +62,7 @@ services:
     container_name: gateway-service
     ports:
       - "3004:3004"
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
       interval: 5s
