@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  identity:
+    build: ./services/identity
+    container_name: identity-service
+    ports:
+      - "3000:3000"
+    networks:
+      - newzone-net
+
+  metadata:
+    build: ./services/metadata
+    container_name: metadata-service
+    ports:
+      - "3001:3000"
+    networks:
+      - newzone-net
+
+  consensus:
+    build: ./services/consensus
+    container_name: consensus-service
+    ports:
+      - "3002:3000"
+    networks:
+      - newzone-net
+
+networks:
+  newzone-net:
+    driver: bridge
