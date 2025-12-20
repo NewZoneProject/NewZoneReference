@@ -13,7 +13,7 @@ services:
     build: ./services/metadata
     container_name: metadata-service
     ports:
-      - "3001:3000"
+      - "3001:3001"
     networks:
       - newzone-net
 
@@ -21,7 +21,7 @@ services:
     build: ./services/consensus
     container_name: consensus-service
     ports:
-      - "3002:3000"
+      - "3002:3002"
     networks:
       - newzone-net
 
