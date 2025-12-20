@@ -66,6 +66,29 @@ services:
     networks:
       - newzone-net
 
+  routing:
+    build: ./services/routing
+    container_name: routing-service
+    ports:
+      - "3005:3005"
+    restart: always
+    depends_on:
+      identity:
+        condition: service_healthy
+      metadata:
+        condition: service_healthy
+      consensus:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3005/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
   gateway:
     build: ./services/gateway
     container_name: gateway-service
@@ -80,6 +103,8 @@ services:
       consensus:
         condition: service_healthy
       storage:
+        condition: service_healthy
+      routing:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
