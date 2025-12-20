@@ -112,6 +112,23 @@ services:
     networks:
       - newzone-net
 
+  logging:
+    build: ./services/logging
+    container_name: logging-service
+    ports:
+      - "3006:3006"
+    restart: always
+    depends_on:
+      routing:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3006/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
