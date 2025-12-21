@@ -214,6 +214,25 @@ services:
     networks:
       - newzone-net
 
+  analytics:
+    build: ./services/analytics
+    container_name: analytics-service
+    ports:
+      - "3012:3012"
+    restart: always
+    depends_on:
+      logging:
+        condition: service_healthy
+      event:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3012/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
