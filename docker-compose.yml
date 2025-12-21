@@ -233,6 +233,23 @@ services:
     networks:
       - newzone-net
 
+  queue:
+    build: ./services/queue
+    container_name: queue-service
+    ports:
+      - "3013:3013"
+    restart: always
+    depends_on:
+      analytics:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3013/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
