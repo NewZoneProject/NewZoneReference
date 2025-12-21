@@ -197,6 +197,23 @@ services:
     networks:
       - newzone-net
 
+  state:
+    build: ./services/state
+    container_name: state-service
+    ports:
+      - "3011:3011"
+    restart: always
+    depends_on:
+      scheduler:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3011/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    networks:
+      - newzone-net
+
 networks:
   newzone-net:
     driver: bridge
