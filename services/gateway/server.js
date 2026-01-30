@@ -1,13 +1,36 @@
 /**
  * Gateway Microservice REST API
  * Unified entrypoint for NewZoneReference
- * Direct proxy routes + optional routing passthrough
+ * Direct proxy routes + optional routing passthrough + crypto verification
  */
 
 import http from "http";
+import fs from "fs";
+import path from "path";
 import { proxyRequest } from "./index.js";
+import cryptoLayer from "../../lib/nz-crypto-adapter-noble.js";
+import {
+  decryptPacket,
+  verifySignedPacket
+} from "../../lib/nz-crypto.js";
 
 const PORT = process.env.PORT || 3004;
+
+// Load node keys
+const node = JSON.parse(fs.readFileSync("./keys/node.json", "utf8"));
+
+// Known nodes (TODO: replace with identity service)
+const knownNodes = {};
+
+// Temporary session key (zeroed)
+const sessionKey = new Uint8Array(32);
+
+// Resolve public key by node_id
+async function getPublicKeyByNodeId(nodeId) {
+  const entry = knownNodes[nodeId];
+  if (!entry || !entry.ed25519_public) return null;
+  return Buffer.from(entry.ed25519_public, "base64");
+}
 
 // Direct routes
 const ROUTES = {
@@ -25,6 +48,40 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200);
     return res.end(JSON.stringify({ status: "ok" }));
+  }
+
+  // Crypto verification route
+  if (req.method === "POST" && req.url === "/verify") {
+    let body = "";
+    req.on("data", chunk => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const packet = JSON.parse(body);
+
+        const signed = packet.version === "nz-crypto-01"
+          ? await decryptPacket({ packet, sessionKey })
+          : packet;
+
+        const result = await verifySignedPacket({
+          packet: signed,
+          getPublicKeyByNodeId,
+          isNonceSeen: null,
+          maxSkewSec: 300
+        });
+
+        if (!result.ok) {
+          res.writeHead(403);
+          return res.end(JSON.stringify({ error: result.reason }));
+        }
+
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, node_id: result.node_id }));
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: "Invalid crypto packet" }));
+      }
+    });
+    return;
   }
 
   // Optional routing passthrough
