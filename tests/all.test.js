@@ -2,22 +2,39 @@
 // NewZone — unified test entry point
 // Run: node --test tests/all.test.js
 //
-// This file simply imports all other test modules so that the Node.js
-// test runner discovers and executes them in a single pass.
+// Tests are grouped from lowest-level primitives → protocols → facade →
+// seed system → RFC-grade full-stack tests.
 // ============================================================================
 
-// Core primitives
+// ---------------------------------------------------------------------------
+// 1. Core cryptographic primitives (lowest level)
+// ---------------------------------------------------------------------------
 import "./blake2b.test.js";
 import "./chacha20poly1305.test.js";
 import "./ed25519.test.js";
 import "./x25519.test.js";
 import "./hkdf.test.js";
 
-// Session + SecureChannel
+// ---------------------------------------------------------------------------
+// 2. Mid-level building blocks (session keys, secure channel)
+// ---------------------------------------------------------------------------
 import "./sessionKeys.test.js";
 import "./secureChannel.test.js";
 
-// Handshake + facade
+// ---------------------------------------------------------------------------
+// 3. Handshake + facade-level API
+// ---------------------------------------------------------------------------
 import "./handshake.test.js";
 import "./nz-crypto.facade.test.js";
 import "./nz-crypto.test.js";
+
+// ---------------------------------------------------------------------------
+// 4. Seed system (NZ-CRYPTO-SEED-01)
+// ---------------------------------------------------------------------------
+import "./seed_rfc.test.js";
+import "./wordlist_integrity.test.js";
+
+// ---------------------------------------------------------------------------
+// 5. Full-stack RFC-grade facade test suite (NZ-CRYPTO-01)
+// ---------------------------------------------------------------------------
+import "./nz_crypto_rfc.test.js";
