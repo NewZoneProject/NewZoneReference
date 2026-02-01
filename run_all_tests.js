@@ -1,38 +1,36 @@
+#!/usr/bin/env node
+
 // ============================================================================
-// run_all_tests.js
-//
-// Unified test runner for the entire NewZone crypto stack.
-// Runs the single aggregated entry point: tests/all.test.js
-//
-// Run:
-//   node run_all_tests.js
+// NewZone — autonomous test runner
+// Scans ./tests for *.test.js and runs them via node:test
+// Run: node run_all_tests.js
 // ============================================================================
 
-const { spawnSync } = require("child_process");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 
-const ROOT = __dirname;
-const ENTRY = path.join(ROOT, "tests/all.test.js");
+const TEST_DIR = "./tests";
 
-function main() {
-  console.log("=== NZ-CRYPTO STACK SELF-TEST ===");
-  console.log("Running: node --test tests/all.test.js\n");
+// Collect all *.test.js files
+const files = fs
+  .readdirSync(TEST_DIR)
+  .filter((f) => f.endsWith(".test.js"))
+  .map((f) => path.join(TEST_DIR, f))
+  .sort(); // deterministic order
 
-  const res = spawnSync(process.execPath, ["--test", ENTRY], {
-    stdio: "inherit",
-  });
-
-  console.log("\n=== NZ-CRYPTO STACK SELF-TEST RESULT ===");
-
-  if (res.status === 0) {
-    console.log("ALL TESTS PASSED");
-    process.exit(0);
-  } else {
-    console.log("SOME TESTS FAILED");
-    process.exit(1);
-  }
+if (files.length === 0) {
+  console.error("No test files found in ./tests");
+  process.exit(1);
 }
 
-if (require.main === module) {
-  main();
-}
+console.log("Running tests:");
+for (const f of files) console.log("  •", f);
+console.log("");
+
+// Run Node's built-in test runner
+const result = spawnSync("node", ["--test", ...files], {
+  stdio: "inherit",
+});
+
+process.exit(result.status);
