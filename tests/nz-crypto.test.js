@@ -1,10 +1,17 @@
-// NewZone — full crypto test suite (pure X25519 version)
-// Run: node tests/nz-crypto.test.js
+// ============================================================================
+// NewZone — full crypto integration test suite
+// Pure Ed25519 + pure X25519 + SEED + packets
+// Run: node --test tests/nz-crypto.test.js
+// ============================================================================
 
-import { nzCrypto } from '../lib/nz-crypto.js';
-import '../lib/nz-crypto-adapter-pure.js';
+import test from "node:test";
+import assert from "node:assert/strict";
 
-import {
+import nz from "../lib/nz-crypto.js";
+import "../lib/nz-crypto-adapter-pure.js";
+
+const {
+  nzCrypto,
   deriveMasterSecret,
   deriveSeedKey,
   deriveSeedKeyFromMnemonic,
@@ -12,126 +19,157 @@ import {
   verifySignedPacket,
   deriveSessionKey,
   encryptPacket,
-  decryptPacket
-} from '../lib/nz-crypto.js';
+  decryptPacket,
+} = nz;
 
-import {
-  x25519GetPublicKey,
-  x25519GetSharedSecret
-} from '../lib/x25519/x25519.js';
+import { x25519, x25519Base } from "../lib/x25519.js";
 
-function log(title) {
-  console.log('\n--- ' + title + ' ---');
-}
+// ---------------------------------------------------------------------------
+// Shared test data
+// ---------------------------------------------------------------------------
 
-(async () => {
-  try {
-    const mnemonic =
-      "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu " +
-      "nu xi omicron pi rho sigma tau upsilon phi chi psi omega one two three";
+const mnemonic =
+  "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu " +
+  "nu xi omicron pi rho sigma tau upsilon phi chi psi omega one two three";
 
-    const password = "test-password";
+const password = "test-password";
 
-    // ------------------------------------------------------------
-    // 1. SEED → master_secret
-    // ------------------------------------------------------------
-    log("SEED → master_secret");
-    const master = await deriveMasterSecret(mnemonic, password);
-    console.log("master_secret:", master.length, "bytes");
+// ---------------------------------------------------------------------------
+// 1. SEED → master_secret
+// ---------------------------------------------------------------------------
 
-    // ------------------------------------------------------------
-    // 2. SEED → deterministic Ed25519 key
-    // ------------------------------------------------------------
-    log("SEED → deterministic Ed25519 key");
-    const seedSign = await deriveSeedKey(master, "id:test:sign");
-    const edKey = await nzCrypto.ed25519.importPrivateKey(seedSign);
-    console.log("publicKey:", edKey.publicKey.length, "bytes");
+test("nz-crypto: deriveMasterSecret", async () => {
+  const master = await deriveMasterSecret(mnemonic, password);
+  assert.equal(master.length, 32);
+});
 
-    // ------------------------------------------------------------
-    // 3. Sign + verify packet
-    // ------------------------------------------------------------
-    log("Sign + verify packet");
-    const packet = await buildSignedPacket({
-      nodeId: "node-test",
-      privateKey: edKey.privateKey,
-      body: { hello: "world" }
-    });
+// ---------------------------------------------------------------------------
+// 2. SEED → deterministic Ed25519 key
+// ---------------------------------------------------------------------------
 
-    const verifyResult = await verifySignedPacket({
-      packet,
-      getPublicKeyByNodeId: async () => edKey.publicKey
-    });
+test("nz-crypto: deterministic Ed25519 key from SEED", async () => {
+  const master = await deriveMasterSecret(mnemonic, password);
+  const seedSign = await deriveSeedKey(master, "id:test:sign");
 
-    console.log("verify:", verifyResult);
+  const edKey = await nzCrypto.ed25519.importPrivateKey(seedSign);
 
-    // ------------------------------------------------------------
-    // 4. Pure X25519 test (direct)
-    // ------------------------------------------------------------
-    log("Pure X25519 test (direct)");
+  assert.equal(edKey.privateKey.length, 32);
+  assert.equal(edKey.publicKey.length, 32);
+});
 
-    const seedX = await deriveSeedKey(master, "id:test:x25519");
-    const privA = new Uint8Array(seedX);
-    const pubA = x25519GetPublicKey(privA);
+// ---------------------------------------------------------------------------
+// 3. Sign + verify packet
+// ---------------------------------------------------------------------------
 
-    const privB = new Uint8Array(seedX.map((x, i) => x ^ 0x55)); // pseudo-second key
-    const pubB = x25519GetPublicKey(privB);
+test("nz-crypto: buildSignedPacket + verifySignedPacket", async () => {
+  const master = await deriveMasterSecret(mnemonic, password);
+  const seedSign = await deriveSeedKey(master, "id:test:sign");
+  const edKey = await nzCrypto.ed25519.importPrivateKey(seedSign);
 
-    const sharedAB = x25519GetSharedSecret(privA, pubB);
-    const sharedBA = x25519GetSharedSecret(privB, pubA);
+  const packet = await buildSignedPacket({
+    nodeId: "node-test",
+    privateKey: edKey.privateKey,
+    body: { hello: "world" },
+  });
 
-    console.log("sharedAB == sharedBA:", sharedAB.toString() === sharedBA.toString());
+  const verifyResult = await verifySignedPacket({
+    packet,
+    getPublicKeyByNodeId: async () => edKey.publicKey,
+  });
 
-    // ------------------------------------------------------------
-    // 5. deriveSessionKey (uses pure X25519)
-    // ------------------------------------------------------------
-    log("deriveSessionKey (pure X25519)");
+  assert.equal(verifyResult.ok, true);
+  assert.equal(verifyResult.node_id, "node-test");
+});
 
-    const xKey = await nzCrypto.x25519.importPrivateKey(seedX);
+// ---------------------------------------------------------------------------
+// 4. Pure X25519 test (direct)
+// ---------------------------------------------------------------------------
 
-    const sessionKey = await deriveSessionKey({
-      ourPrivX25519: xKey.privateKey,
-      theirPubX25519: xKey.publicKey
-    });
+test("nz-crypto: pure X25519 key agreement", async () => {
+  const master = await deriveMasterSecret(mnemonic, password);
+  const seedX = await deriveSeedKey(master, "id:test:x25519");
 
-    console.log("sessionKey:", sessionKey.length, "bytes");
+  const privA = new Uint8Array(seedX);
+  const pubA = x25519Base(privA);
 
-    // ------------------------------------------------------------
-    // 6. Encrypt + decrypt packet
-    // ------------------------------------------------------------
-    log("Encrypt + decrypt packet");
+  const privB = new Uint8Array(seedX.map((x) => x ^ 0x55));
+  const pubB = x25519Base(privB);
 
-    const encrypted = await encryptPacket({
-      packet,
-      sessionKey,
-      senderNodeId: "node-test",
-      receiverNodeId: "node-test"
-    });
+  const sharedAB = x25519(privA, pubB);
+  const sharedBA = x25519(privB, pubA);
 
-    console.log("encrypted:", encrypted);
+  assert.equal(
+    Buffer.from(sharedAB).toString("hex"),
+    Buffer.from(sharedBA).toString("hex")
+  );
+});
 
-    const decrypted = await decryptPacket({
-      packet: encrypted,
-      sessionKey
-    });
+// ---------------------------------------------------------------------------
+// 5. deriveSessionKey (pure X25519)
+// ---------------------------------------------------------------------------
 
-    console.log("decrypted:", decrypted);
+test("nz-crypto: deriveSessionKey", async () => {
+  const master = await deriveMasterSecret(mnemonic, password);
+  const seedX = await deriveSeedKey(master, "id:test:x25519");
 
-    // ------------------------------------------------------------
-    // 7. Full SEED → key chain
-    // ------------------------------------------------------------
-    log("deriveSeedKeyFromMnemonic");
+  const xKey = await nzCrypto.x25519.importPrivateKey(seedX);
 
-    const seedFull = await deriveSeedKeyFromMnemonic(
-      mnemonic,
-      password,
-      "id:test:full"
-    );
+  const sessionKey = await deriveSessionKey({
+    ourPrivX25519: xKey.privateKey,
+    theirPubX25519: xKey.publicKey,
+  });
 
-    console.log("seedFull:", seedFull.length, "bytes");
+  assert.equal(sessionKey.length, 32);
+});
 
-    console.log("\nAll tests completed successfully.");
+// ---------------------------------------------------------------------------
+// 6. Encrypt + decrypt packet
+// ---------------------------------------------------------------------------
 
-  } catch (err) {
-    console.error("Test failed:", err);
-  }
-})();
+test("nz-crypto: encryptPacket + decryptPacket", async () => {
+  const master = await deriveMasterSecret(mnemonic, password);
+  const seedSign = await deriveSeedKey(master, "id:test:sign");
+  const seedX = await deriveSeedKey(master, "id:test:x25519");
+
+  const edKey = await nzCrypto.ed25519.importPrivateKey(seedSign);
+  const xKey = await nzCrypto.x25519.importPrivateKey(seedX);
+
+  const packet = await buildSignedPacket({
+    nodeId: "node-test",
+    privateKey: edKey.privateKey,
+    body: { hello: "world" },
+  });
+
+  const sessionKey = await deriveSessionKey({
+    ourPrivX25519: xKey.privateKey,
+    theirPubX25519: xKey.publicKey,
+  });
+
+  const encrypted = await encryptPacket({
+    packet,
+    sessionKey,
+    senderNodeId: "node-test",
+    receiverNodeId: "node-test",
+  });
+
+  const decrypted = await decryptPacket({
+    packet: encrypted,
+    sessionKey,
+  });
+
+  assert.deepEqual(decrypted.body, { hello: "world" });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Full SEED → key chain
+// ---------------------------------------------------------------------------
+
+test("nz-crypto: deriveSeedKeyFromMnemonic", async () => {
+  const seedFull = await deriveSeedKeyFromMnemonic(
+    mnemonic,
+    password,
+    "id:test:full"
+  );
+
+  assert.equal(seedFull.length, 32);
+});
