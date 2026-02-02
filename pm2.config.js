@@ -1,6 +1,5 @@
 // Module: PM2 Cluster Configuration
-// Description: Launches all NewZone microservices via PM2 on fixed ports.
-// Run: pm2 start pm2.config.js
+// Description: Process manager config for all NewZone microservices.
 // File: pm2.config.js
 
 module.exports = {
@@ -20,6 +19,7 @@ module.exports = {
         { name: "queue",       script: "services/queue/server.js" },
         { name: "rules",       script: "services/rules/server.js" },
         { name: "p2p",         script: "services/p2p/server.js" },
-        { name: "replication", script: "services/replication/server.js" }
+        { name: "replication", script: "services/replication/server.js" },
+        { name: "event",       script: "services/event/server.js" }
     ]
 };

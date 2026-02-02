@@ -1,24 +1,18 @@
-/**
- * Consensus Microservice
- * Stateless consensus integrity proofs
- * Based on NZ-0046 (Consensus Integrity Proofs)
- * and NZ-0058 (Consensus Forward Proofs)
- *
- * Portable Vanilla JS, no external dependencies.
- */
+// Module: Consensus Microservice Core
+// Description: Stateless consensus integrity proofs (NZ-0046, NZ-0058)
+// File: index.js
 
-import crypto from "crypto";
+const crypto = require("crypto");
 
 /**
  * Generate deterministic consensus proof
  * @param {object} payload - arbitrary JSON object representing consensus input
  * @returns {string} proof_id
  */
-export function generateConsensusProof(payload) {
-  const json = JSON.stringify(payload);
-  const hash = crypto.createHash("sha256").update(json).digest("hex");
-  // Consensus proofs use full 64-char SHA-256
-  return hash;
+function generateConsensusProof(payload) {
+    const json = JSON.stringify(payload);
+    const hash = crypto.createHash("sha256").update(json).digest("hex");
+    return hash; // full 64-char SHA-256
 }
 
 /**
@@ -27,16 +21,19 @@ export function generateConsensusProof(payload) {
  * @param {string} proof_id - expected proof
  * @returns {boolean}
  */
-export function verifyConsensusProof(payload, proof_id) {
-  return generateConsensusProof(payload) === proof_id;
+function verifyConsensusProof(payload, proof_id) {
+    return generateConsensusProof(payload) === proof_id;
 }
 
-/**
- * Example usage (stateless API simulation)
- */
+module.exports = {
+    generateConsensusProof,
+    verifyConsensusProof
+};
+
+// Optional CLI test
 if (require.main === module) {
-  const payload = { round: 1, votes: ["A", "B", "A"] };
-  const proof = generateConsensusProof(payload);
-  console.log("Generated Consensus Proof:", proof);
-  console.log("Verification:", verifyConsensusProof(payload, proof));
+    const payload = { round: 1, votes: ["A", "B", "A"] };
+    const proof = generateConsensusProof(payload);
+    console.log("Generated Consensus Proof:", proof);
+    console.log("Verification:", verifyConsensusProof(payload, proof));
 }

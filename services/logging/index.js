@@ -1,8 +1,6 @@
-/**
- * Logging Microservice
- * Minimal in-memory log collector for NewZoneReference
- * Pure Node.js, no dependencies
- */
+// Module: Logging Microservice Core
+// Description: Minimal in-memory log collector for NewZoneReference.
+// File: index.js
 
 const logs = [];
 const MAX_LOGS = 500; // bounded memory, stateless philosophy
@@ -12,23 +10,24 @@ const MAX_LOGS = 500; // bounded memory, stateless philosophy
  * @param {string} source
  * @param {string} event
  * @param {object|null} payload
+ * @returns {object}
  */
-export function addLog(source, event, payload = null) {
-  const entry = {
-    ts: Date.now(),
-    source,
-    event,
-    payload
-  };
+function addLog(source, event, payload = null) {
+    const entry = {
+        ts: Date.now(),
+        source,
+        event,
+        payload
+    };
 
-  logs.push(entry);
+    logs.push(entry);
 
-  // keep memory bounded
-  if (logs.length > MAX_LOGS) {
-    logs.shift();
-  }
+    // keep memory bounded
+    if (logs.length > MAX_LOGS) {
+        logs.shift();
+    }
 
-  return entry;
+    return entry;
 }
 
 /**
@@ -36,6 +35,11 @@ export function addLog(source, event, payload = null) {
  * @param {number} limit
  * @returns {Array}
  */
-export function getLogs(limit = 100) {
-  return logs.slice(-limit);
+function getLogs(limit = 100) {
+    return logs.slice(-limit);
 }
+
+module.exports = {
+    addLog,
+    getLogs
+};

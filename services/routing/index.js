@@ -1,10 +1,8 @@
-/**
- * Routing Microservice
- * Minimal message router for NewZoneReference
- * Stateless, no dependencies
- */
+// Module: Routing Microservice Core
+// Description: Minimal message router for NewZoneReference (stateless forward + route resolution).
+// File: index.js
 
-import http from "http";
+const http = require("http");
 
 /**
  * Forward message to target service
@@ -15,33 +13,33 @@ import http from "http";
  * @param {object|null} body
  * @returns {Promise<object>}
  */
-export function forward(host, port, path, method, body = null) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: host,
-      port,
-      path,
-      method,
-      headers: { "Content-Type": "application/json" }
-    };
+function forward(host, port, path, method, body = null) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: host,
+            port,
+            path,
+            method,
+            headers: { "Content-Type": "application/json" }
+        };
 
-    const req = http.request(options, res => {
-      let data = "";
-      res.on("data", chunk => (data += chunk));
-      res.on("end", () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          resolve({ error: "Invalid response from target" });
-        }
-      });
+        const req = http.request(options, res => {
+            let data = "";
+            res.on("data", chunk => (data += chunk));
+            res.on("end", () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch {
+                    resolve({ error: "Invalid response from target" });
+                }
+            });
+        });
+
+        req.on("error", reject);
+
+        if (body) req.write(JSON.stringify(body));
+        req.end();
     });
-
-    req.on("error", reject);
-
-    if (body) req.write(JSON.stringify(body));
-    req.end();
-  });
 }
 
 /**
@@ -49,13 +47,18 @@ export function forward(host, port, path, method, body = null) {
  * @param {string} target
  * @returns {{host: string, port: number}|null}
  */
-export function resolveRoute(target) {
-  const routes = {
-    identity:  { host: "identity-service",  port: 3000 },
-    metadata:  { host: "metadata-service",  port: 3001 },
-    consensus: { host: "consensus-service", port: 3002 },
-    storage:   { host: "storage-service",   port: 3003 }
-  };
+function resolveRoute(target) {
+    const routes = {
+        identity:  { host: "identity-service",  port: 3000 },
+        metadata:  { host: "metadata-service",  port: 3001 },
+        consensus: { host: "consensus-service", port: 3002 },
+        storage:   { host: "storage-service",   port: 3003 }
+    };
 
-  return routes[target] || null;
+    return routes[target] || null;
 }
+
+module.exports = {
+    forward,
+    resolveRoute
+};

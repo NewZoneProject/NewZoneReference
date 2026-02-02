@@ -1,49 +1,61 @@
-/**
- * State Microservice
- * Minimal key-value state store for NewZoneReference
- * Pure Node.js, no dependencies
- */
+// Module: State Microservice Core
+// Description: Minimal key-value state store for NewZoneReference.
+// File: index.js
 
 const STATE = {};
 const MAX_KEYS = 500;
 
 /**
  * Set state value
+ * @param {string} key
+ * @param {any} value
+ * @returns {object}
  */
-export function setState(key, value) {
-  if (Object.keys(STATE).length >= MAX_KEYS && !STATE[key]) {
-    // remove oldest key
-    const oldest = Object.keys(STATE).sort(
-      (a, b) => STATE[a].ts - STATE[b].ts
-    )[0];
-    delete STATE[oldest];
-  }
+function setState(key, value) {
+    if (Object.keys(STATE).length >= MAX_KEYS && !STATE[key]) {
+        // remove oldest key
+        const oldest = Object.keys(STATE).sort(
+            (a, b) => STATE[a].ts - STATE[b].ts
+        )[0];
+        delete STATE[oldest];
+    }
 
-  STATE[key] = {
-    value,
-    ts: Date.now()
-  };
+    STATE[key] = {
+        value,
+        ts: Date.now()
+    };
 
-  return STATE[key];
+    return STATE[key];
 }
 
 /**
  * Get state value
+ * @param {string} key
+ * @returns {object|null}
  */
-export function getState(key) {
-  return STATE[key] || null;
+function getState(key) {
+    return STATE[key] || null;
 }
 
 /**
  * Delete state value
+ * @param {string} key
  */
-export function deleteState(key) {
-  delete STATE[key];
+function deleteState(key) {
+    delete STATE[key];
 }
 
 /**
  * List keys
+ * @returns {Array<string>}
  */
-export function listKeys() {
-  return Object.keys(STATE);
+function listKeys() {
+    return Object.keys(STATE);
 }
+
+module.exports = {
+    setState,
+    getState,
+    deleteState,
+    listKeys
+};

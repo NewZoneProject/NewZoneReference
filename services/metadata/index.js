@@ -1,23 +1,18 @@
-/**
- * Metadata Microservice
- * Stateless metadata integrity proofs
- * Based on NZ-0037, NZ-0057
- *
- * Portable Vanilla JS, no external dependencies.
- */
+// Module: Metadata Microservice Core
+// Description: Stateless metadata integrity proofs (NZ-0037, NZ-0057)
+// File: index.js
 
-import crypto from "crypto";
+const crypto = require("crypto");
 
 /**
  * Generate deterministic metadata proof
  * @param {object} metadata - arbitrary JSON object
  * @returns {string} proof_id
  */
-export function generateMetadataProof(metadata) {
-  const json = JSON.stringify(metadata);
-  const hash = crypto.createHash("sha256").update(json).digest("hex");
-  // Fixed-width proof: 64 chars
-  return hash;
+function generateMetadataProof(metadata) {
+    const json = JSON.stringify(metadata);
+    const hash = crypto.createHash("sha256").update(json).digest("hex");
+    return hash; // fixed-width 64-char SHA-256
 }
 
 /**
@@ -26,16 +21,19 @@ export function generateMetadataProof(metadata) {
  * @param {string} proof_id - expected proof
  * @returns {boolean}
  */
-export function verifyMetadataProof(metadata, proof_id) {
-  return generateMetadataProof(metadata) === proof_id;
+function verifyMetadataProof(metadata, proof_id) {
+    return generateMetadataProof(metadata) === proof_id;
 }
 
-/**
- * Example usage (stateless API simulation)
- */
+module.exports = {
+    generateMetadataProof,
+    verifyMetadataProof
+};
+
+// Optional CLI test
 if (require.main === module) {
-  const metadata = { doc: "contract", version: 1 };
-  const proof = generateMetadataProof(metadata);
-  console.log("Generated Proof:", proof);
-  console.log("Verification:", verifyMetadataProof(metadata, proof));
+    const metadata = { doc: "contract", version: 1 };
+    const proof = generateMetadataProof(metadata);
+    console.log("Generated Proof:", proof);
+    console.log("Verification:", verifyMetadataProof(metadata, proof));
 }

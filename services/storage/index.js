@@ -1,11 +1,8 @@
-/**
- * Storage Microservice
- * Minimal content-addressed object store
- * Stateless API, in-memory storage
- * Based on NewZone storage principles (NZ-0038, NZ-0040, NZ-0059)
- */
+// Module: Storage Microservice Core
+// Description: Minimal content-addressed object store (SHA-256 based) for NewZoneReference.
+// File: index.js
 
-import crypto from "crypto";
+const crypto = require("crypto");
 
 // In-memory store: { hash_id: object }
 const STORE = {};
@@ -15,9 +12,9 @@ const STORE = {};
  * @param {object} payload
  * @returns {string} hash_id
  */
-export function generateHash(payload) {
-  const json = JSON.stringify(payload);
-  return crypto.createHash("sha256").update(json).digest("hex");
+function generateHash(payload) {
+    const json = JSON.stringify(payload);
+    return crypto.createHash("sha256").update(json).digest("hex");
 }
 
 /**
@@ -25,10 +22,10 @@ export function generateHash(payload) {
  * @param {object} payload
  * @returns {string} hash_id
  */
-export function storeObject(payload) {
-  const hash_id = generateHash(payload);
-  STORE[hash_id] = payload;
-  return hash_id;
+function storeObject(payload) {
+    const hash_id = generateHash(payload);
+    STORE[hash_id] = payload;
+    return hash_id;
 }
 
 /**
@@ -36,8 +33,8 @@ export function storeObject(payload) {
  * @param {string} hash_id
  * @returns {object|null}
  */
-export function getObject(hash_id) {
-  return STORE[hash_id] || null;
+function getObject(hash_id) {
+    return STORE[hash_id] || null;
 }
 
 /**
@@ -46,6 +43,13 @@ export function getObject(hash_id) {
  * @param {string} hash_id
  * @returns {boolean}
  */
-export function verifyObject(payload, hash_id) {
-  return generateHash(payload) === hash_id;
+function verifyObject(payload, hash_id) {
+    return generateHash(payload) === hash_id;
 }
+
+module.exports = {
+    generateHash,
+    storeObject,
+    getObject,
+    verifyObject
+};
