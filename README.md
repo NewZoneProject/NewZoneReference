@@ -167,6 +167,52 @@ NewZoneReference is intentionally simple — it is designed to be read, understo
 
 ---
 
+## Running the Cluster with PM2 (Android / Termux / Bare Metal)
+
+Docker is not available on Android without root, so the NewZone cluster can also be launched using **PM2**, a lightweight process manager for Node.js.
+
+### 1. Install pm2
+
+```bash
+npm install -g pm2
+```
+
+### 2. Start all microservices
+
+```bash
+pm2 start pm2.config.js
+```
+
+This configuration file launches every service on its fixed port (3000–3016).
+
+### 3. Check status
+
+```bash
+pm2 ls
+```
+
+### 4. View logs
+
+```bash
+pm2 logs
+```
+
+### 5. Stop the cluster
+
+```bash
+pm2 stop all
+```
+
+### 6. Restart the cluster
+
+```bash
+pm2 restart all
+```
+
+PM2 provides a clean, portable alternative to Docker Compose and works perfectly on Android devices via Termux.
+
+---
+
 ## License
 
 MIT — free for all use cases.
