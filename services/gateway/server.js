@@ -6,11 +6,17 @@
 const http = require("http");
 const { proxyRequest } = require("./index.js");
 const { decryptPacket, verifySignedPacket } = require("../../lib/nz-crypto.js");
+const { verifyRoutingPacket } = require("../../lib/nz-crypto-routing.js");
+const { autoRegister, startHeartbeat } = require("../../lib/nz-lib.js");
+const { PORTS } = require("../../config/ports.js");
 
-const PORT = process.env.PORT || 3004;
+const PORT = PORTS.gateway;
+const SERVICE_ROLE = "gateway";
 
-// Trusted nodes (TODO: replace with identity/directory service)
-const knownNodes = {};
+// -------------------------------
+// Dynamic trust-store
+// -------------------------------
+let knownNodes = {};
 
 // Stateless session key placeholder (not used for signing)
 const sessionKey = new Uint8Array(32);
@@ -18,18 +24,43 @@ const sessionKey = new Uint8Array(32);
 // Resolve public key by node_id
 async function getPublicKeyByNodeId(nodeId) {
     const entry = knownNodes[nodeId];
-    if (!entry || !entry.ed25519_public) return null;
-    return Buffer.from(entry.ed25519_public, "base64");
+    if (!entry || !entry.public_key) return null;
+    return Buffer.from(entry.public_key, "base64");
 }
 
-// Direct routes
+// Periodically update trust-store from discovery-service
+async function updateKnownNodes() {
+    try {
+        const req = http.get(`http://localhost:${PORTS.discovery}/nodes`, res => {
+            let data = "";
+            res.on("data", chunk => (data += chunk));
+            res.on("end", () => {
+                try {
+                    knownNodes = JSON.parse(data);
+                } catch {}
+            });
+        });
+
+        req.on("error", () => {});
+    } catch {}
+}
+
+setInterval(updateKnownNodes, 5000);
+updateKnownNodes();
+
+// -------------------------------
+// Direct routes (strict, static)
+// -------------------------------
 const ROUTES = {
-    "/identity":  { host: "identity-service",  port: 3000 },
-    "/metadata":  { host: "metadata-service",  port: 3001 },
-    "/consensus": { host: "consensus-service", port: 3002 },
-    "/storage":   { host: "storage-service",   port: 3003 }
+    "/identity":  { host: "localhost", port: PORTS.identity },
+    "/metadata":  { host: "localhost", port: PORTS.metadata },
+    "/consensus": { host: "localhost", port: PORTS.consensus },
+    "/storage":   { host: "localhost", port: PORTS.storage }
 };
 
+// -------------------------------
+// HTTP Server
+// -------------------------------
 const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
@@ -40,7 +71,9 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ status: "ok" }));
     }
 
-    // POST /verify — crypto verification endpoint
+    // -------------------------------
+    // POST /verify — crypto verification
+    // -------------------------------
     if (req.method === "POST" && req.url === "/verify") {
         let body = "";
         req.on("data", chunk => (body += chunk));
@@ -66,17 +99,19 @@ const server = http.createServer(async (req, res) => {
                 }
 
                 res.writeHead(200);
-                res.end(JSON.stringify({ ok: true, node_id: result.node_id }));
+                return res.end(JSON.stringify({ ok: true, node_id: result.node_id }));
             } catch {
                 res.writeHead(400);
-                res.end(JSON.stringify({ error: "Invalid crypto packet" }));
+                return res.end(JSON.stringify({ error: "Invalid crypto packet" }));
             }
         });
 
         return;
     }
 
-    // POST /route — optional routing passthrough
+    // -------------------------------
+    // POST /route — passthrough to routing-service
+    // -------------------------------
     if (req.method === "POST" && req.url === "/route") {
         let body = "";
         req.on("data", chunk => (body += chunk));
@@ -84,26 +119,29 @@ const server = http.createServer(async (req, res) => {
         req.on("end", async () => {
             try {
                 const parsed = JSON.parse(body);
+
                 const result = await proxyRequest(
-                    "routing-service",
-                    3005,
+                    "localhost",
+                    PORTS.routing,
                     "/route",
                     "POST",
                     parsed
                 );
 
                 res.writeHead(200);
-                res.end(JSON.stringify(result));
+                return res.end(JSON.stringify(result));
             } catch {
                 res.writeHead(400);
-                res.end(JSON.stringify({ error: "Invalid request" }));
+                return res.end(JSON.stringify({ error: "Invalid request" }));
             }
         });
 
         return;
     }
 
+    // -------------------------------
     // Direct proxy routes
+    // -------------------------------
     const prefix = Object.keys(ROUTES).find(p => req.url.startsWith(p));
     if (!prefix) {
         res.writeHead(404);
@@ -128,17 +166,39 @@ const server = http.createServer(async (req, res) => {
             }
         }
 
+        // --- Crypto-routing verification (strict mode) ---
+        if (parsed && parsed.version === "nz-routing-crypto-01") {
+            const result = await verifyRoutingPacket({
+                packet: parsed,
+                getPublicKeyByNodeId,
+                maxSkewSec: 300
+            });
+
+            if (!result.ok) {
+                res.writeHead(403);
+                return res.end(JSON.stringify({ error: result.reason }));
+            }
+
+            parsed = result.payload;
+        }
+
         try {
             const result = await proxyRequest(host, port, path, req.method, parsed);
             res.writeHead(200);
-            res.end(JSON.stringify(result));
+            return res.end(JSON.stringify(result));
         } catch {
             res.writeHead(500);
-            res.end(JSON.stringify({ error: "Gateway error" }));
+            return res.end(JSON.stringify({ error: "Gateway error" }));
         }
     });
 });
 
+// -------------------------------
+// Startup: register + heartbeat
+// -------------------------------
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`Gateway Microservice running on http://0.0.0.0:${PORT}`);
+
+    autoRegister(SERVICE_ROLE, PORT);
+    startHeartbeat(SERVICE_ROLE, PORT, 10000);
 });

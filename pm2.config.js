@@ -18,8 +18,10 @@ module.exports = {
         { name: "state",       script: "services/state/server.js" },
         { name: "queue",       script: "services/queue/server.js" },
         { name: "rules",       script: "services/rules/server.js" },
-        { name: "p2p",         script: "services/p2p/server.js" },
+        { name: "p2p-node",         script: "services/p2p_node/server.js" },
+        { name: "p2p-messaging",         script: "services/p2p_messaging/server.js" },
         { name: "replication", script: "services/replication/server.js" },
-        { name: "event",       script: "services/event/server.js" }
+        { name: "event",       script: "services/event/server.js" },
+        { name: "discovery",   script: "services/discovery/server.js" }
     ]
 };

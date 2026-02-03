@@ -1,13 +1,94 @@
 // Module: Analytics Microservice HTTP Server
-// Description: Provides metrics, recomputation, and summary endpoints for analytics.
+// Description: Provides metrics, recomputation, summary, and record storage with full crypto-routing + discovery trust-store.
 // Run: node server.js
 // File: server.js
 
-const http = require("http");
-const { recomputeMetrics, getMetrics } = require("./index.js");
+import http from "node:http";
+import { recomputeMetrics, getMetrics } from "./index.js";
+import { verifyRoutingPacket } from "../../lib/nz-crypto-routing.js";
+import { autoRegister, startHeartbeat } from "../../lib/nz-lib.js";
+import { PORTS } from "../../config/ports.js";
 
-const PORT = process.env.PORT || 3012;
+const PORT = PORTS.analytics;
+const SERVICE_ROLE = "analytics";
 
+// -------------------------------
+// Dynamic trust-store
+// -------------------------------
+let knownNodes = {};
+
+async function getPublicKeyByNodeId(nodeId) {
+    const entry = knownNodes[nodeId];
+    if (!entry || !entry.public_key) return null;
+    return Buffer.from(entry.public_key, "base64");
+}
+
+async function updateKnownNodes() {
+    try {
+        const req = http.get(`http://localhost:${PORTS.discovery}/nodes`, res => {
+            let data = "";
+            res.on("data", c => (data += c));
+            res.on("end", () => {
+                try {
+                    knownNodes = JSON.parse(data);
+                } catch {}
+            });
+        });
+        req.on("error", () => {});
+    } catch {}
+}
+
+setInterval(updateKnownNodes, 5000);
+updateKnownNodes();
+
+// -------------------------------
+// Crypto-routing parser
+// -------------------------------
+async function parseRequestBodyWithCrypto(req, res) {
+    return new Promise(resolve => {
+        let body = "";
+        req.on("data", c => (body += c));
+        req.on("end", async () => {
+            if (!body) return resolve({ ok: true, payload: null });
+
+            let parsed;
+            try {
+                parsed = JSON.parse(body);
+            } catch {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error: "Invalid JSON" }));
+                return resolve({ ok: false });
+            }
+
+            if (parsed && parsed.version === "nz-routing-crypto-01") {
+                const result = await verifyRoutingPacket({
+                    packet: parsed,
+                    getPublicKeyByNodeId,
+                    maxSkewSec: 300
+                });
+
+                if (!result.ok) {
+                    res.writeHead(403);
+                    res.end(JSON.stringify({ error: result.reason }));
+                    return resolve({ ok: false });
+                }
+
+                return resolve({ ok: true, payload: result.payload });
+            }
+
+            return resolve({ ok: true, payload: parsed });
+        });
+    });
+}
+
+// -------------------------------
+// In-memory analytics record store
+// -------------------------------
+const records = [];
+
+// -------------------------------
+// HTTP Server
+// -------------------------------
 const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
@@ -18,16 +99,41 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ status: "ok" }));
     }
 
-    // GET /metrics — return current metrics without recompute
+    // -------------------------------
+    // TEST-COMPATIBLE ENDPOINTS
+    // -------------------------------
+
+    // POST /record — soft-mode JSON
+    if (req.method === "POST" && req.url === "/record") {
+        const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
+        if (!ok) return;
+
+        records.push(payload);
+        res.writeHead(200);
+        return res.end(JSON.stringify(payload));
+    }
+
+    // GET /records
+    if (req.method === "GET" && req.url === "/records") {
+        res.writeHead(200);
+        return res.end(JSON.stringify(records));
+    }
+
+    // -------------------------------
+    // ORIGINAL ANALYTICS ENDPOINTS
+    // -------------------------------
+
     if (req.method === "GET" && req.url === "/metrics") {
         res.writeHead(200);
         return res.end(JSON.stringify(getMetrics()));
     }
 
-    // POST /recompute — recompute metrics now
     if (req.method === "POST" && req.url === "/recompute") {
+        const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
+        if (!ok) return;
+
         try {
-            const metrics = await recomputeMetrics();
+            const metrics = await recomputeMetrics(payload);
             res.writeHead(200);
             return res.end(JSON.stringify(metrics));
         } catch {
@@ -36,7 +142,6 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // GET /summary — compact overview
     if (req.method === "GET" && req.url === "/summary") {
         const m = getMetrics();
 
@@ -54,6 +159,12 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: "Not found" }));
 });
 
+// -------------------------------
+// Startup: register + heartbeat
+// -------------------------------
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`Analytics Microservice running on http://0.0.0.0:${PORT}`);
+
+    autoRegister(SERVICE_ROLE, PORT);
+    startHeartbeat(SERVICE_ROLE, PORT, 10000);
 });

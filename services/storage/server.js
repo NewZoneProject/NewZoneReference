@@ -1,28 +1,96 @@
 // Module: Storage Microservice HTTP Server
-// Description: Minimal content-addressed object store API for NewZoneReference.
+// Description: Minimal key-value storage API for NewZoneReference with crypto-routing soft-mode.
 // Run: node server.js
 // File: server.js
 
 const http = require("http");
-const { storeObject, getObject, verifyObject } = require("./index.js");
+const { verifyRoutingPacket } = require("../../lib/nz-crypto-routing.js");
+const { autoRegister, startHeartbeat } = require("../../lib/nz-lib.js");
+const { PORTS } = require("../../config/ports.js");
 
-const PORT = process.env.PORT || 3003;
+const PORT = PORTS.storage;
+const SERVICE_ROLE = "storage";
 
-// Optional logging (non-blocking)
-async function logEvent(source, event, payload = null) {
-    try {
-        await fetch("http://logging-service:3006/log", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ source, event, payload })
-        });
-    } catch {
-        // Logging is optional — ignore errors
-    }
+// -------------------------------
+// In-memory key-value store
+// -------------------------------
+const STORE = {}; // key → value
+
+// -------------------------------
+// Dynamic trust-store
+// -------------------------------
+let knownNodes = {};
+
+async function getPublicKeyByNodeId(nodeId) {
+    const entry = knownNodes[nodeId];
+    if (!entry || !entry.public_key) return null;
+    return Buffer.from(entry.public_key, "base64");
 }
 
-const server = http.createServer((req, res) => {
-    // Enable CORS + JSON headers
+async function updateKnownNodes() {
+    try {
+        const req = http.get(`http://localhost:${PORTS.discovery}/nodes`, res => {
+            let data = "";
+            res.on("data", c => (data += c));
+            res.on("end", () => {
+                try {
+                    knownNodes = JSON.parse(data);
+                } catch {}
+            });
+        });
+        req.on("error", () => {});
+    } catch {}
+}
+
+setInterval(updateKnownNodes, 5000);
+updateKnownNodes();
+
+// -------------------------------
+// Crypto-routing parser
+// -------------------------------
+async function parseRequestBodyWithCrypto(req, res) {
+    return new Promise(resolve => {
+        let body = "";
+        req.on("data", c => (body += c));
+        req.on("end", async () => {
+            if (!body) return resolve({ ok: true, payload: null });
+
+            let parsed;
+            try {
+                parsed = JSON.parse(body);
+            } catch {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error: "Invalid JSON" }));
+                return resolve({ ok: false });
+            }
+
+            // Crypto-routing packet
+            if (parsed && parsed.version === "nz-routing-crypto-01") {
+                const result = await verifyRoutingPacket({
+                    packet: parsed,
+                    getPublicKeyByNodeId,
+                    maxSkewSec: 300
+                });
+
+                if (!result.ok) {
+                    res.writeHead(403);
+                    res.end(JSON.stringify({ error: result.reason }));
+                    return resolve({ ok: false });
+                }
+
+                return resolve({ ok: true, payload: result.payload });
+            }
+
+            // Soft-mode
+            return resolve({ ok: true, payload: parsed });
+        });
+    });
+}
+
+// -------------------------------
+// HTTP Server
+// -------------------------------
+const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
 
@@ -32,68 +100,36 @@ const server = http.createServer((req, res) => {
         return res.end(JSON.stringify({ status: "ok" }));
     }
 
-    // POST /store — store object
-    if (req.method === "POST" && req.url === "/store") {
-        let body = "";
-        req.on("data", chunk => (body += chunk));
+    // POST /set — store key/value
+    if (req.method === "POST" && req.url === "/set") {
+        const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
+        if (!ok) return;
 
-        req.on("end", () => {
-            try {
-                const { payload } = JSON.parse(body);
-                const hash_id = storeObject(payload);
+        try {
+            const { key, value } = payload || {};
+            if (!key) throw new Error();
 
-                // Non-blocking logging
-                logEvent("storage", "object_stored", { hash_id });
+            STORE[key] = value;
 
-                res.writeHead(200);
-                res.end(JSON.stringify({ hash_id }));
-            } catch {
-                res.writeHead(400);
-                res.end(JSON.stringify({ error: "Invalid request" }));
-            }
-        });
-
-        return;
+            res.writeHead(200);
+            return res.end(JSON.stringify({ key, value }));
+        } catch {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ error: "Invalid request" }));
+        }
     }
 
-    // GET /get/<hash> — retrieve object
+    // GET /get/<key>
     if (req.method === "GET" && req.url.startsWith("/get/")) {
-        const hash_id = req.url.split("/get/")[1];
-        const obj = getObject(hash_id);
+        const key = req.url.slice(5);
 
-        if (obj) {
-            res.writeHead(200);
-            res.end(JSON.stringify({ payload: obj }));
-        } else {
+        if (!(key in STORE)) {
             res.writeHead(404);
-            res.end(JSON.stringify({ error: "Not found" }));
+            return res.end(JSON.stringify({ error: "Not found" }));
         }
 
-        return;
-    }
-
-    // POST /verify — verify object integrity
-    if (req.method === "POST" && req.url === "/verify") {
-        let body = "";
-        req.on("data", chunk => (body += chunk));
-
-        req.on("end", () => {
-            try {
-                const { payload, hash_id } = JSON.parse(body);
-                const valid = verifyObject(payload, hash_id);
-
-                // Optional logging
-                logEvent("storage", "object_verified", { hash_id, valid });
-
-                res.writeHead(200);
-                res.end(JSON.stringify({ valid }));
-            } catch {
-                res.writeHead(400);
-                res.end(JSON.stringify({ error: "Invalid request" }));
-            }
-        });
-
-        return;
+        res.writeHead(200);
+        return res.end(JSON.stringify({ key, value: STORE[key] }));
     }
 
     // Not found
@@ -101,6 +137,12 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ error: "Not found" }));
 });
 
+// -------------------------------
+// Startup
+// -------------------------------
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`Storage Microservice running on http://0.0.0.0:${PORT}`);
+
+    autoRegister(SERVICE_ROLE, PORT);
+    startHeartbeat(SERVICE_ROLE, PORT, 10000);
 });

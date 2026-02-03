@@ -1,22 +1,14 @@
-// Module: Monitoring Microservice HTTP Server
-// Description: Cluster health aggregator + report collector with crypto-routing soft-mode.
+// Module: P2P Messaging Microservice HTTP Server
+// Description: Minimal P2P messaging API with crypto-routing soft-mode.
 // Run: node server.js
 // File: server.js
 
 const http = require("http");
-const { checkServices, getRecentEvents } = require("./index.js");
+const { storeMessage, listMessages } = require("./index.js");
 const { verifyRoutingPacket } = require("../../lib/nz-crypto-routing.js");
-const { autoRegister, startHeartbeat } = require("../../lib/nz-lib.js");
 const { PORTS } = require("../../config/ports.js");
 
-const PORT = PORTS.monitoring;
-const SERVICE_ROLE = "monitoring";
-const START_TIME = Date.now();
-
-// -------------------------------
-// In-memory report store
-// -------------------------------
-const reports = []; // { service, status, ts }
+const PORT = PORTS.p2p_messaging;
 
 // -------------------------------
 // Dynamic trust-store
@@ -48,7 +40,7 @@ setInterval(updateKnownNodes, 5000);
 updateKnownNodes();
 
 // -------------------------------
-// Crypto-routing soft-mode parser
+// Crypto-routing parser
 // -------------------------------
 async function parseRequestBodyWithCrypto(req, res) {
     return new Promise(resolve => {
@@ -66,7 +58,7 @@ async function parseRequestBodyWithCrypto(req, res) {
                 return resolve({ ok: false });
             }
 
-            if (parsed && parsed.version === "nz-routing-crypto-01") {
+            if (parsed.version === "nz-routing-crypto-01") {
                 const result = await verifyRoutingPacket({
                     packet: parsed,
                     getPublicKeyByNodeId,
@@ -100,84 +92,41 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ status: "ok" }));
     }
 
-    // -------------------------------
-    // POST /report — store service report
-    // -------------------------------
-    if (req.method === "POST" && req.url === "/report") {
+    // POST /send
+    if (req.method === "POST" && req.url === "/send") {
         const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
         if (!ok) return;
 
         try {
-            const { service, status, ts } = payload || {};
-            const entry = { service, status, ts };
-            reports.push(entry);
+            const { to, message } = payload || {};
+            if (!to || !message) throw new Error();
+
+            const entry = storeMessage(to, message);
 
             res.writeHead(200);
-            return res.end(JSON.stringify(entry));
+            return res.end(JSON.stringify({
+                to: entry.to,
+                message: entry.message
+            }));
         } catch {
             res.writeHead(400);
-            return res.end(JSON.stringify({ error: "Invalid request" }));
+            return res.end(JSON.stringify({ error: "Invalid message" }));
         }
     }
 
-    // -------------------------------
-    // GET /reports — list stored reports
-    // -------------------------------
-    if (req.method === "GET" && req.url === "/reports") {
+    // GET /messages
+    if (req.method === "GET" && req.url === "/messages") {
         res.writeHead(200);
-        return res.end(JSON.stringify(reports));
+        return res.end(JSON.stringify(listMessages()));
     }
 
-    // -------------------------------
-    // GET /services — aggregated health
-    // -------------------------------
-    if (req.method === "GET" && req.url === "/services") {
-        const status = await checkServices();
-        res.writeHead(200);
-        return res.end(JSON.stringify(status));
-    }
-
-    // -------------------------------
-    // GET /metrics — uptime + events + service status
-    // -------------------------------
-    if (req.method === "GET" && req.url === "/metrics") {
-        const uptime = Date.now() - START_TIME;
-        const status = await checkServices();
-        const events = await getRecentEvents(50);
-
-        res.writeHead(200);
-        return res.end(JSON.stringify({
-            uptime_ms: uptime,
-            services: status,
-            recent_events: events
-        }));
-    }
-
-    // -------------------------------
-    // GET /status — human-readable summary
-    // -------------------------------
-    if (req.method === "GET" && req.url === "/status") {
-        const status = await checkServices();
-        const ok = Object.values(status).every(s => s.ok);
-
-        res.writeHead(200);
-        return res.end(JSON.stringify({
-            cluster: ok ? "healthy" : "degraded",
-            services: status
-        }));
-    }
-
-    // Not found
     res.writeHead(404);
     res.end(JSON.stringify({ error: "Not found" }));
 });
 
 // -------------------------------
-// Startup: register + heartbeat
+// Startup
 // -------------------------------
 server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Monitoring Microservice running on http://0.0.0.0:${PORT}`);
-
-    autoRegister(SERVICE_ROLE, PORT);
-    startHeartbeat(SERVICE_ROLE, PORT, 10000);
+    console.log(`P2P Messaging Microservice running on http://0.0.0.0:${PORT}`);
 });

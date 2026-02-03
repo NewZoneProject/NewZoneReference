@@ -3,6 +3,7 @@
 // File: index.js
 
 const http = require("http");
+const { PORTS } = require("../../config/ports.js");
 
 /**
  * Forward message to target service
@@ -49,10 +50,10 @@ function forward(host, port, path, method, body = null) {
  */
 function resolveRoute(target) {
     const routes = {
-        identity:  { host: "identity-service",  port: 3000 },
-        metadata:  { host: "metadata-service",  port: 3001 },
-        consensus: { host: "consensus-service", port: 3002 },
-        storage:   { host: "storage-service",   port: 3003 }
+        identity:  { host: "localhost", port: PORTS.identity },
+        metadata:  { host: "localhost", port: PORTS.metadata },
+        consensus: { host: "localhost", port: PORTS.consensus },
+        storage:   { host: "localhost", port: PORTS.storage }
     };
 
     return routes[target] || null;

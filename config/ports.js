@@ -1,0 +1,21 @@
+module.exports.PORTS = {
+    identity:       3000,
+    metadata:       3001,
+    consensus:      3002,
+    storage:        3003,
+    gateway:        3004,
+    routing:        3005,
+    logging:        3006,
+    monitoring:     3007,
+    event:          3008,
+    directory:      3009,
+    scheduler:      3010,
+    state:          3011,
+    analytics:      3012,
+    queue:          3013,
+    rules:          3014,
+    p2p_node:       3015,
+    p2p_messaging:  3016,
+    replication:    3017,
+    discovery:      3018
+};

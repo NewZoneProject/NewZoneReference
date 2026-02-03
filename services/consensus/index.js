@@ -2,14 +2,14 @@
 // Description: Stateless consensus integrity proofs (NZ-0046, NZ-0058)
 // File: index.js
 
-const crypto = require("crypto");
+import crypto from "node:crypto";
 
 /**
  * Generate deterministic consensus proof
  * @param {object} payload - arbitrary JSON object representing consensus input
  * @returns {string} proof_id
  */
-function generateConsensusProof(payload) {
+export function generateConsensusProof(payload) {
     const json = JSON.stringify(payload);
     const hash = crypto.createHash("sha256").update(json).digest("hex");
     return hash; // full 64-char SHA-256
@@ -21,17 +21,12 @@ function generateConsensusProof(payload) {
  * @param {string} proof_id - expected proof
  * @returns {boolean}
  */
-function verifyConsensusProof(payload, proof_id) {
+export function verifyConsensusProof(payload, proof_id) {
     return generateConsensusProof(payload) === proof_id;
 }
 
-module.exports = {
-    generateConsensusProof,
-    verifyConsensusProof
-};
-
 // Optional CLI test
-if (require.main === module) {
+if (import.meta.main) {
     const payload = { round: 1, votes: ["A", "B", "A"] };
     const proof = generateConsensusProof(payload);
     console.log("Generated Consensus Proof:", proof);
