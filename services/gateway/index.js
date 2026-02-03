@@ -16,51 +16,66 @@ try {
     nodeKeys = parsed;
     nodeId = parsed.node_id;
 } catch {
-    // If keys missing — signing disabled (soft mode)
     nodeKeys = null;
     nodeId = null;
 }
 
 /**
  * Proxy request to target microservice
- * @param {string} host
- * @param {number} port
- * @param {string} path
- * @param {string} method
- * @param {object|null} body
- * @param {boolean} sign - whether to wrap body into crypto-routing packet
- * @returns {Promise<object>}
+ * Returns: { status, body }
  */
 function proxyRequest(host, port, path, method, body = null, sign = false) {
-    return new Promise((resolve, reject) => {
-        let finalBody = body ? JSON.stringify(body) : "";
+    return new Promise(resolve => {
+        let finalBody = "";
 
-        const options = {
-            hostname: host,
-            port,
-            path,
-            method,
-            headers: {
-                "Content-Type": "application/json",
-                "Content-Length": Buffer.byteLength(finalBody)
-            }
-        };
+        if (sign && nodeKeys) {
+            finalBody = JSON.stringify(
+                signRoutingPacket({
+                    nodeId,
+                    privateKey: nodeKeys.private_key,
+                    payload: body
+                })
+            );
+        } else {
+            finalBody = body ? JSON.stringify(body) : "";
+        }
 
-        const req = http.request(options, res => {
-            let data = "";
-            res.on("data", chunk => (data += chunk));
-            res.on("end", () => {
-                if (!data) return resolve({}); // empty response
-
-                try {
-                    resolve(JSON.parse(data)); // raw identity response
-                } catch {
-                    resolve({ error: "Invalid JSON from service" });
+        const req = http.request(
+            {
+                hostname: host,
+                port,
+                path,
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(finalBody)
                 }
+            },
+            res => {
+                let data = "";
+                res.on("data", chunk => (data += chunk));
+                res.on("end", () => {
+                    let parsed = {};
+                    try {
+                        parsed = JSON.parse(data);
+                    } catch {
+                        parsed = { error: "Invalid JSON from service" };
+                    }
+
+                    resolve({
+                        status: res.statusCode,
+                        body: parsed
+                    });
+                });
+            }
+        );
+
+        req.on("error", err => {
+            resolve({
+                status: 500,
+                body: { error: "Gateway forward error", detail: err.message }
             });
         });
-
-        req.on("error", reject);
 
         if (finalBody) req.write(finalBody);
         req.end();

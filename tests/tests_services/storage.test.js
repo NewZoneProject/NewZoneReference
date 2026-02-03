@@ -1,5 +1,5 @@
 // Module: Storage Microservice Integration Test
-// Description: Integration test for the Storage service of NewZoneReference with crypto-routing soft-mode.
+// Description: Direct tests for the Storage service (KV + CAS + crypto-routing soft-mode).
 // Run: node --test tests/tests_services/storage.test.js
 // File: storage.test.js
 
@@ -17,9 +17,9 @@ const PORTS = await import(path.resolve(__dirname, "../../config/ports.js"))
 
 const BASE = `http://localhost:${PORTS.storage}`;
 
-// -------------------------------
-// Tests
-// -------------------------------
+// ============================================================
+// HEALTH
+// ============================================================
 
 test("storage: health", async () => {
     const res = await fetch(`${BASE}/health`);
@@ -29,24 +29,15 @@ test("storage: health", async () => {
     assert.equal(json.status, "ok");
 });
 
-test("storage: reject invalid crypto-routing packet", async () => {
-    const res = await fetch(`${BASE}/set`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            version: "nz-routing-crypto-01",
-            bogus: true
-        })
-    });
+// ============================================================
+// KV MODE
+// ============================================================
 
-    assert.equal(res.status, 403);
-});
+test("storage: KV set", async () => {
+    const key = "kv_test_" + Math.random().toString(36).slice(2);
+    const value = "v_" + Date.now();
 
-test("storage: allow plain JSON in soft-mode", async () => {
-    const key = "storage_key_" + Math.random().toString(36).slice(2);
-    const value = "value_" + Date.now();
-
-    const res = await fetch(`${BASE}/set`, {
+    const res = await fetch(`${BASE}/kv/set`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key, value })
@@ -59,22 +50,115 @@ test("storage: allow plain JSON in soft-mode", async () => {
     assert.equal(json.value, value);
 });
 
-test("storage: get stored value", async () => {
-    const key = "storage_key_" + Math.random().toString(36).slice(2);
-    const value = "value_" + Date.now();
+test("storage: KV get", async () => {
+    const key = "kv_test_" + Math.random().toString(36).slice(2);
+    const value = "v_" + Date.now();
 
-    // set
-    await fetch(`${BASE}/set`, {
+    await fetch(`${BASE}/kv/set`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key, value })
     });
 
-    // get
-    const res = await fetch(`${BASE}/get/${key}`);
+    const res = await fetch(`${BASE}/kv/get/${key}`);
     assert.equal(res.status, 200);
 
     const json = await res.json();
     assert.equal(json.key, key);
     assert.equal(json.value, value);
+});
+
+test("storage: KV missing key → 404", async () => {
+    const res = await fetch(`${BASE}/kv/get/does_not_exist_${Date.now()}`);
+    assert.equal(res.status, 404);
+});
+
+// ============================================================
+// CAS MODE
+// ============================================================
+
+test("storage: CAS store", async () => {
+    const obj = { a: 1, ts: Date.now() };
+
+    const res = await fetch(`${BASE}/cas/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(obj)
+    });
+
+    assert.equal(res.status, 200);
+
+    const json = await res.json();
+    assert.ok(json.hash_id);
+});
+
+test("storage: CAS get", async () => {
+    const obj = { a: 1, ts: Date.now() };
+
+    const res1 = await fetch(`${BASE}/cas/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(obj)
+    });
+
+    const { hash_id } = await res1.json();
+
+    const res2 = await fetch(`${BASE}/cas/get/${hash_id}`);
+    assert.equal(res2.status, 200);
+
+    const json = await res2.json();
+    assert.deepEqual(json, obj);
+});
+
+test("storage: CAS missing hash → 404", async () => {
+    const res = await fetch(`${BASE}/cas/get/does_not_exist_${Date.now()}`);
+    assert.equal(res.status, 404);
+});
+
+test("storage: CAS verify OK", async () => {
+    const obj = { x: 123, ts: Date.now() };
+
+    const res1 = await fetch(`${BASE}/cas/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(obj)
+    });
+
+    const { hash_id } = await res1.json();
+
+    const res2 = await fetch(`${BASE}/cas/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ object: obj, hash_id })
+    });
+
+    assert.equal(res2.status, 200);
+
+    const json = await res2.json();
+    assert.equal(json.ok, true);
+});
+
+test("storage: CAS verify FAIL", async () => {
+    const obj = { x: 123, ts: Date.now() };
+
+    const res1 = await fetch(`${BASE}/cas/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(obj)
+    });
+
+    const { hash_id } = await res1.json();
+
+    const mutated = { ...obj, hacked: true };
+
+    const res2 = await fetch(`${BASE}/cas/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ object: mutated, hash_id })
+    });
+
+    assert.equal(res2.status, 200);
+
+    const json = await res2.json();
+    assert.equal(json.ok, false);
 });

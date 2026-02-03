@@ -1,5 +1,5 @@
 // Module: Rules Microservice HTTP Server
-// Description: Minimal rule store for NewZoneReference with crypto-routing soft-mode.
+// Description: History rule processor for NewZoneReference (queue → rules → replication/logging/analytics).
 // Run: node server.js
 // File: server.js
 
@@ -7,12 +7,14 @@ const http = require("http");
 const { verifyRoutingPacket } = require("../../lib/nz-crypto-routing.js");
 const { autoRegister, startHeartbeat } = require("../../lib/nz-lib.js");
 const { PORTS } = require("../../config/ports.js");
+const { forward } = require("../routing/index.js");
+const { setHistoryRule, getHistoryRule, evaluateRules } = require("./index.js");
 
 const PORT = PORTS.rules;
 const SERVICE_ROLE = "rules";
 
 // -------------------------------
-// In-memory rule store
+// In-memory rule store (for /set /get API)
 // -------------------------------
 const RULES = {}; // key → value
 
@@ -88,6 +90,33 @@ async function parseRequestBodyWithCrypto(req, res) {
 }
 
 // -------------------------------
+// Background: process history queue
+// -------------------------------
+async function processHistoryQueue() {
+    try {
+        const result = await forward(
+            "localhost",
+            PORTS.queue,
+            "/dequeue",
+            "POST",
+            { queue: "history" }
+        );
+
+        if (result.status === 200 && result.body && !result.body.empty) {
+            // Queue item shape: { ts, payload: { hash_id, payload } }
+            const context = result.body.payload || {};
+            await evaluateRules(context);
+        }
+    } catch {
+        // soft-fail, retry on next tick
+    }
+
+    setTimeout(processHistoryQueue, 200);
+}
+
+processHistoryQueue();
+
+// -------------------------------
 // HTTP Server
 // -------------------------------
 const server = http.createServer(async (req, res) => {
@@ -101,8 +130,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------
-    // POST /set — store rule
-    // -------------------------------
+    // POST /set — store rule (B1: history_rule config)
+// -------------------------------
     if (req.method === "POST" && req.url === "/set") {
         const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
         if (!ok) return;
@@ -112,6 +141,11 @@ const server = http.createServer(async (req, res) => {
             if (!key) throw new Error();
 
             RULES[key] = value;
+
+            // Special key: history_rule → update core config
+            if (key === "history_rule") {
+                setHistoryRule(value);
+            }
 
             res.writeHead(200);
             return res.end(JSON.stringify({ key, value }));
@@ -134,6 +168,12 @@ const server = http.createServer(async (req, res) => {
 
         res.writeHead(200);
         return res.end(JSON.stringify({ key, value: RULES[key] }));
+    }
+
+    // Optional: GET /config — debug current history_rule
+    if (req.method === "GET" && req.url === "/config") {
+        res.writeHead(200);
+        return res.end(JSON.stringify(getHistoryRule()));
     }
 
     // Not found

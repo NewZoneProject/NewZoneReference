@@ -1,9 +1,10 @@
 // Module: Event Microservice HTTP Server
-// Description: Stateless event bus API (publish, list, subscribe) with full crypto-routing + discovery trust-store.
+// Description: Signed event publisher + legacy in-memory event bus with crypto-routing support.
 // Run: node server.js
 // File: server.js
 
 const http = require("http");
+const crypto = require("crypto");
 const {
     publishEvent,
     getEvents,
@@ -11,6 +12,7 @@ const {
     removeSubscription,
     listSubscriptions
 } = require("./index.js");
+const { forward } = require("../routing/index.js");
 const { verifyRoutingPacket } = require("../../lib/nz-crypto-routing.js");
 const { autoRegister, startHeartbeat } = require("../../lib/nz-lib.js");
 const { PORTS } = require("../../config/ports.js");
@@ -19,7 +21,7 @@ const PORT = PORTS.event;
 const SERVICE_ROLE = "event";
 
 // -------------------------------
-// Dynamic trust-store (auto-updated from discovery)
+// Dynamic trust-store
 // -------------------------------
 let knownNodes = {};
 
@@ -33,14 +35,11 @@ async function updateKnownNodes() {
     try {
         const req = http.get(`http://localhost:${PORTS.discovery}/nodes`, res => {
             let data = "";
-            res.on("data", chunk => (data += chunk));
+            res.on("data", c => (data += c));
             res.on("end", () => {
-                try {
-                    knownNodes = JSON.parse(data);
-                } catch {}
+                try { knownNodes = JSON.parse(data); } catch {}
             });
         });
-
         req.on("error", () => {});
     } catch {}
 }
@@ -49,12 +48,12 @@ setInterval(updateKnownNodes, 5000);
 updateKnownNodes();
 
 // -------------------------------
-// Helper: parse body and optionally unwrap crypto-routing
+// Helper: parse body with crypto-routing
 // -------------------------------
 async function parseRequestBodyWithCrypto(req, res) {
     return new Promise(resolve => {
         let body = "";
-        req.on("data", chunk => (body += chunk));
+        req.on("data", c => (body += c));
         req.on("end", async () => {
             if (!body) return resolve({ ok: true, payload: null });
 
@@ -64,10 +63,10 @@ async function parseRequestBodyWithCrypto(req, res) {
             } catch {
                 res.writeHead(400);
                 res.end(JSON.stringify({ error: "Invalid JSON" }));
-                return resolve({ ok: false, payload: null });
+                return resolve({ ok: false });
             }
 
-            if (parsed && parsed.version === "nz-routing-crypto-01") {
+            if (parsed.version === "nz-routing-crypto-01") {
                 const result = await verifyRoutingPacket({
                     packet: parsed,
                     getPublicKeyByNodeId,
@@ -77,7 +76,7 @@ async function parseRequestBodyWithCrypto(req, res) {
                 if (!result.ok) {
                     res.writeHead(403);
                     res.end(JSON.stringify({ error: result.reason }));
-                    return resolve({ ok: false, payload: null });
+                    return resolve({ ok: false });
                 }
 
                 return resolve({ ok: true, payload: result.payload });
@@ -95,13 +94,84 @@ const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
 
-    // Healthcheck
+    // Health
     if (req.method === "GET" && req.url === "/health") {
         res.writeHead(200);
         return res.end(JSON.stringify({ status: "ok" }));
     }
 
-    // POST /event — publish event
+    // -------------------------------
+    // POST /publish — signed event ingestion
+    // -------------------------------
+    if (req.method === "POST" && req.url === "/publish") {
+        const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
+        if (!ok) return;
+
+        const { payload: eventPayload, signature, public_key } = payload || {};
+
+        if (!eventPayload || !signature || !public_key) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ error: "Missing fields" }));
+        }
+
+        // Verify signature
+        try {
+            const valid = crypto.verify(
+                null,
+                Buffer.from(JSON.stringify(eventPayload)),
+                public_key,
+                Buffer.from(signature, "base64")
+            );
+
+            if (!valid) {
+                res.writeHead(403);
+                return res.end(JSON.stringify({ error: "Invalid signature" }));
+            }
+        } catch {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ error: "Invalid signature or key" }));
+        }
+
+        // Store payload in CAS via routing
+        const result = await forward(
+            "localhost",
+            PORTS.storage,
+            "/cas/store",
+            "POST",
+            eventPayload
+        );
+
+        if (result.status !== 200) {
+            res.writeHead(500);
+            return res.end(JSON.stringify({ error: "CAS store failed", detail: result.body }));
+        }
+
+        const hash_id = result.body.hash_id;
+
+        // -------------------------------
+        // NEW: enqueue event for rules engine
+        // -------------------------------
+        await forward(
+            "localhost",
+            PORTS.queue,
+            "/enqueue",
+            "POST",
+            {
+                queue: "history",
+                payload: { hash_id, payload: eventPayload }
+            }
+        );
+
+        // Also publish to in-memory event bus
+        publishEvent("signed_event", "event-service", { hash_id, payload: eventPayload });
+
+        res.writeHead(200);
+        return res.end(JSON.stringify({ ok: true, hash_id }));
+    }
+
+    // -------------------------------
+    // Legacy: POST /event
+    // -------------------------------
     if (req.method === "POST" && req.url === "/event") {
         const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
         if (!ok) return;
@@ -118,7 +188,7 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // GET /events — list events
+    // Legacy: GET /events
     if (req.method === "GET" && req.url.startsWith("/events")) {
         const url = new URL(req.url, "http://localhost");
         const type = url.searchParams.get("type");
@@ -130,7 +200,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify(events));
     }
 
-    // POST /subscribe — add subscription
+    // Legacy: POST /subscribe
     if (req.method === "POST" && req.url === "/subscribe") {
         const { ok, payload } = await parseRequestBodyWithCrypto(req, res);
         if (!ok) return;
@@ -147,13 +217,13 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // GET /subscriptions — list subscriptions
+    // Legacy: GET /subscriptions
     if (req.method === "GET" && req.url === "/subscriptions") {
         res.writeHead(200);
         return res.end(JSON.stringify(listSubscriptions()));
     }
 
-    // DELETE /subscriptions/<id>
+    // Legacy: DELETE /subscriptions/<id>
     if (req.method === "DELETE" && req.url.startsWith("/subscriptions/")) {
         const id = req.url.split("/subscriptions/")[1];
         removeSubscription(id);
@@ -167,7 +237,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 // -------------------------------
-// Startup: register + heartbeat
+// Startup
 // -------------------------------
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`Event Microservice running on http://0.0.0.0:${PORT}`);

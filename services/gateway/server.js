@@ -18,29 +18,23 @@ const SERVICE_ROLE = "gateway";
 // -------------------------------
 let knownNodes = {};
 
-// Stateless session key placeholder (not used for signing)
 const sessionKey = new Uint8Array(32);
 
-// Resolve public key by node_id
 async function getPublicKeyByNodeId(nodeId) {
     const entry = knownNodes[nodeId];
     if (!entry || !entry.public_key) return null;
     return Buffer.from(entry.public_key, "base64");
 }
 
-// Periodically update trust-store from discovery-service
 async function updateKnownNodes() {
     try {
         const req = http.get(`http://localhost:${PORTS.discovery}/nodes`, res => {
             let data = "";
             res.on("data", chunk => (data += chunk));
             res.on("end", () => {
-                try {
-                    knownNodes = JSON.parse(data);
-                } catch {}
+                try { knownNodes = JSON.parse(data); } catch {}
             });
         });
-
         req.on("error", () => {});
     } catch {}
 }
@@ -49,7 +43,7 @@ setInterval(updateKnownNodes, 5000);
 updateKnownNodes();
 
 // -------------------------------
-// Direct routes (strict, static)
+// Direct routes
 // -------------------------------
 const ROUTES = {
     "/identity":  { host: "localhost", port: PORTS.identity },
@@ -128,8 +122,9 @@ const server = http.createServer(async (req, res) => {
                     parsed
                 );
 
-                res.writeHead(200);
-                return res.end(JSON.stringify(result));
+                res.writeHead(result.status);
+                return res.end(JSON.stringify(result.body));
+
             } catch {
                 res.writeHead(400);
                 return res.end(JSON.stringify({ error: "Invalid request" }));
@@ -158,15 +153,14 @@ const server = http.createServer(async (req, res) => {
         let parsed = null;
 
         if (body) {
-            try {
-                parsed = JSON.parse(body);
-            } catch {
+            try { parsed = JSON.parse(body); }
+            catch {
                 res.writeHead(400);
                 return res.end(JSON.stringify({ error: "Invalid JSON" }));
             }
         }
 
-        // --- Crypto-routing verification (strict mode) ---
+        // Crypto-routing strict mode
         if (parsed && parsed.version === "nz-routing-crypto-01") {
             const result = await verifyRoutingPacket({
                 packet: parsed,
@@ -184,8 +178,10 @@ const server = http.createServer(async (req, res) => {
 
         try {
             const result = await proxyRequest(host, port, path, req.method, parsed);
-            res.writeHead(200);
-            return res.end(JSON.stringify(result));
+
+            res.writeHead(result.status);
+            return res.end(JSON.stringify(result.body));
+
         } catch {
             res.writeHead(500);
             return res.end(JSON.stringify({ error: "Gateway error" }));
@@ -194,7 +190,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 // -------------------------------
-// Startup: register + heartbeat
+// Startup
 // -------------------------------
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`Gateway Microservice running on http://0.0.0.0:${PORT}`);

@@ -1,128 +1,112 @@
 // Module: Rules Microservice Core
-// Description: Minimal rule engine for NewZoneReference (conditions + actions).
+// Description: Minimal rule engine for NewZoneReference (history_rule → replication/logging/analytics).
 // File: index.js
 
-const RULES = [];
-const MAX_RULES = 200;
+const { PORTS } = require("../../config/ports.js");
+
+// Single declarative rule for history flow
+// Config is set via /set with key = "history_rule"
+let HISTORY_RULE = {
+    replicate: false,
+    log: false,
+    analytics: false
+};
 
 /**
- * Add rule
- * @param {object} condition
- * @param {object} action
+ * Set history rule config
+ * @param {object} value
+ */
+function setHistoryRule(value) {
+    if (!value || typeof value !== "object") return;
+    HISTORY_RULE = {
+        ...HISTORY_RULE,
+        ...value
+    };
+}
+
+/**
+ * Get current history rule config
  * @returns {object}
  */
-function addRule(condition, action) {
-    const id = "rule-" + Math.random().toString(36).slice(2, 10);
-
-    const rule = {
-        id,
-        condition,
-        action,
-        ts: Date.now()
-    };
-
-    RULES.push(rule);
-    if (RULES.length > MAX_RULES) RULES.shift();
-
-    return rule;
+function getHistoryRule() {
+    return HISTORY_RULE;
 }
 
 /**
- * List rules
- * @returns {Array}
- */
-function listRules() {
-    return RULES;
-}
-
-/**
- * Remove rule
- * @param {string} id
- */
-function removeRule(id) {
-    const idx = RULES.findIndex(r => r.id === id);
-    if (idx !== -1) RULES.splice(idx, 1);
-}
-
-/**
- * Evaluate a single rule
- * @param {object} rule
+ * Apply replication action
  * @param {object} context
  */
-async function evaluateRule(rule, context) {
-    const { condition, action } = rule;
-
-    // Condition: simple key/value match
-    const key = condition.key;
-    const value = condition.value;
-
-    if (context[key] !== value) return;
-
-    // Action types
-    if (action.type === "event") {
-        try {
-            await fetch("http://event-service:3008/event", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: action.event_type,
-                    source: "rules",
-                    payload: action.payload || null
-                })
-            });
-        } catch {}
-    }
-
-    if (action.type === "queue") {
-        try {
-            await fetch("http://queue-service:3013/enqueue", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    queue: action.queue,
-                    payload: action.payload || null
-                })
-            });
-        } catch {}
-    }
-
-    if (action.type === "state") {
-        try {
-            await fetch("http://state-service:3011/set", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    key: action.key,
-                    value: action.value
-                })
-            });
-        } catch {}
-    }
-
-    if (action.type === "callback") {
-        try {
-            await fetch(action.url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(context)
-            });
-        } catch {}
+async function applyReplication(context) {
+    try {
+        await fetch(`http://localhost:${PORTS.replication}/replicate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(context)
+        });
+    } catch {
+        // soft-fail, no throw
     }
 }
 
 /**
- * Evaluate all rules against a context
+ * Apply logging action
+ * @param {object} context
+ */
+async function applyLogging(context) {
+    try {
+        await fetch(`http://localhost:${PORTS.logging}/log`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                source: "rules",
+                event: "history_event",
+                payload: context
+            })
+        });
+    } catch {
+        // soft-fail
+    }
+}
+
+/**
+ * Apply analytics action
+ * @param {object} context
+ */
+async function applyAnalytics(context) {
+    try {
+        await fetch(`http://localhost:${PORTS.analytics}/record`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(context)
+        });
+    } catch {
+        // soft-fail
+    }
+}
+
+/**
+ * Evaluate rules for given context
+ * For B1: single history_rule applied to all history events.
  * @param {object} context
  */
 async function evaluateRules(context) {
-    for (const rule of RULES) {
-        await evaluateRule(rule, context);
+    const cfg = HISTORY_RULE;
+
+    if (cfg.replicate) {
+        await applyReplication(context);
+    }
+
+    if (cfg.log) {
+        await applyLogging(context);
+    }
+
+    if (cfg.analytics) {
+        await applyAnalytics(context);
     }
 }
 
 module.exports = {
-    addRule,
-    listRules,
-    removeRule,
+    setHistoryRule,
+    getHistoryRule,
     evaluateRules
 };

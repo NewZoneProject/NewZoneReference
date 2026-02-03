@@ -77,7 +77,7 @@ async function parseRequestBodyWithCrypto(req, res) {
                 return resolve({ ok: true, payload: result.payload });
             }
 
-            // Plain JSON soft-mode
+            // Soft-mode
             return resolve({ ok: true, payload: parsed });
         });
     });
@@ -104,11 +104,12 @@ const server = http.createServer(async (req, res) => {
         if (!ok) return;
 
         try {
-            // Support both test soft-mode and real routing
             const target = payload.target || payload.service;
             const path = payload.path;
             const method = payload.method || "POST";
-            const inner = payload.payload || {};
+
+            // Correct body extraction
+            const inner = payload.body || {};
 
             const route = resolveRoute(target);
             if (!route) {
@@ -116,6 +117,7 @@ const server = http.createServer(async (req, res) => {
                 return res.end(JSON.stringify({ error: "Unknown target" }));
             }
 
+            // Forward request and receive { status, body }
             const result = await forward(
                 route.host,
                 route.port,
@@ -124,9 +126,9 @@ const server = http.createServer(async (req, res) => {
                 inner
             );
 
-            // Soft-mode: return raw result (test expects this)
-            res.writeHead(200);
-            return res.end(JSON.stringify(result));
+            // Correctly proxy status code and body
+            res.writeHead(result.status);
+            return res.end(JSON.stringify(result.body));
 
         } catch (err) {
             res.writeHead(400);
